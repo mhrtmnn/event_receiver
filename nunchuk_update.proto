@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+// [START messages]
+message NunchukUpdate {
+	message ButInfo {
+		enum ButStates {
+			UP		= 0;
+			DOWN	= 1;
+			KEEP	= 2;
+		}
+
+		ButStates but_c	= 1;
+		ButStates but_z	= 2;
+	}
+
+	message JoyInfo {
+		double joy_x = 1;
+		double joy_y = 2;
+	}
+
+	string query 		= 1;
+	ButInfo Buttons 	= 2;
+	JoyInfo Joystick	= 3;
+}
+// [END messages]
