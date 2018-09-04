@@ -9,7 +9,7 @@ Button input events (**Button C** and **Button Z**) and Joystick input events (*
 
 Events are packed into a [protobuf], that is described by `nunchuk_update.proto`.
 
-IP and Port of the receiving service are advertised by [avahi]. (TODO)
+IP and Port of the receiving service are advertised by [avahi].
 
 
 [//]: # (Reference Links)
