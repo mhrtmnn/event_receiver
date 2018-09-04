@@ -10,4 +10,4 @@ proto:
 	protoc --go_out=go_pkg/src/nunchuk_proto $(PROTO_NAME).proto
 
 clean:
-	rm -rf $(PROG) $(PROTO_NAME).pb.go
+	rm -rf $(PROG) go_pkg
