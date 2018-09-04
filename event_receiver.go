@@ -5,10 +5,36 @@ import (
 	"log"
 	"net"
 	pb "nunchuk_proto"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/grandcat/zeroconf"
 )
 
+// Register the event receiver via mDNS (avahi compatible)
+func register_service() {
+	fmt.Printf("Starting zeroconf service\n")
+
+	server, err := zeroconf.Register("EventSender_Zeroconf", "_http._tcp", "local.", 8888, []string{"txtv=0", "lo=1", "la=2"}, nil)
+	if err != nil {
+		panic(err)
+	}
+	defer server.Shutdown()
+
+	// Clean exit.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	select {
+	case <-sig:
+		// Exit by user
+	}
+
+	log.Println("Shutting down.")
+}
+
+// unpack a packed nunchuk update protobuf
 func unpack_proto(buff []byte) error {
 	nun_upd := &pb.NunchukUpdate{}
 
@@ -24,7 +50,9 @@ func unpack_proto(buff []byte) error {
 	return nil
 }
 
-func start_server() {
+// start udp server and listen for incoming packets
+func start_udp_server() {
+	fmt.Printf("Starting Event Listener\n")
 
 	// start listener
 	conn, err := net.ListenPacket("udp", ":8888")
@@ -51,7 +79,6 @@ func start_server() {
 }
 
 func main() {
-	fmt.Printf("Starting Event Receiver\n")
-
-	start_server()
+	go start_udp_server()
+	register_service()
 }
