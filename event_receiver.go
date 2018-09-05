@@ -17,7 +17,7 @@ import (
 func register_service() {
 	fmt.Printf("Starting zeroconf service\n")
 
-	server, err := zeroconf.Register("EventSender_Zeroconf", "_http._tcp", "local.", 8888, []string{"txtv=0", "lo=1", "la=2"}, nil)
+	server, err := zeroconf.Register("EventSender_Zeroconf", "_protobuf._udp", "local.", 8888, nil, nil)
 	if err != nil {
 		panic(err)
 	}
