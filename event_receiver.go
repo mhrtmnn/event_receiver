@@ -11,11 +11,47 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-vgo/robotgo"
 	"github.com/golang/protobuf/proto"
 	"github.com/grandcat/zeroconf"
 )
 
-var target_iface_name = "enp8s0"
+/***********************************************************************************************************************
+* GLOBAL DATATYPES
+***********************************************************************************************************************/
+type last_mouse struct {
+	x, y int
+}
+
+/***********************************************************************************************************************
+* GLOBAL VATIABLES
+***********************************************************************************************************************/
+const (
+	NO_CHANGE         int    = -1
+	BUT_THRESH        int    = 8
+	DBG_MODE          bool   = false
+	target_iface_name string = "enp8s0"
+)
+
+var g_last_coord = last_mouse{0, 0}
+
+/***********************************************************************************************************************
+* HELPER FUNCS
+***********************************************************************************************************************/
+// math lib only works on float64
+func Abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func Max(x int, y int) int {
+	if x > y {
+		return x
+	}
+	return y
+}
 
 // custom error handler
 func Fatal(err error, c chan struct{}) {
@@ -23,6 +59,28 @@ func Fatal(err error, c chan struct{}) {
 	close(c) // initiate emergency shutdown
 }
 
+func heart_beat(id int, globalQuit chan struct{}, sig chan int) {
+	log.Printf("Starting Heartbeat\n")
+
+	for {
+		log.Printf("Heartbeat\n")
+		time.Sleep(2 * time.Second)
+
+		// clean exit
+		select {
+		case <-globalQuit:
+			log.Printf("Shutdown heartbeat func\n")
+			sig <- id
+			return
+		default:
+			// pass
+		}
+	}
+}
+
+/***********************************************************************************************************************
+* AVAHI SERVICE
+***********************************************************************************************************************/
 // Register the event receiver via mDNS (avahi compatible)
 func register_service(id int, globalQuit chan struct{}, sig chan int) {
 	var target_iface net.Interface
@@ -36,7 +94,9 @@ func register_service(id int, globalQuit chan struct{}, sig chan int) {
 	}
 
 	for i, iface := range ifaces {
-		// fmt.Printf("Found nw interface %s\n", iface.Name)
+		if DBG_MODE {
+			fmt.Printf("Found nw interface %s\n", iface.Name)
+		}
 		if iface.Name == target_iface_name {
 			target_iface = iface
 			break
@@ -59,22 +119,114 @@ func register_service(id int, globalQuit chan struct{}, sig chan int) {
 	sig <- id // signal main that cleanup is complete
 }
 
+/***********************************************************************************************************************
+* PROTOBUF
+***********************************************************************************************************************/
 // unpack a packed nunchuk update protobuf
-func unpack_proto(buff []byte) error {
+func unpack_proto(buff []byte) (*pb.NunchukUpdate, error) {
+	/**
+	 * nun_upd is pointer to zero initialized structure.
+	 * Returning a ptr to a local variable is legal in go,
+	 * an escape analysis is performed to check if the address is
+	 * used after the function returns. If so, the variable is
+	 * allocated on the heap. (https://golang.org/doc/faq#stack_or_heap)
+	 */
 	nun_upd := &pb.NunchukUpdate{}
 
 	if err := proto.Unmarshal(buff, nun_upd); err != nil {
 		log.Println("Failed to parse the protobuf:", err)
-		return err
+		return nil, err
 	}
 
-	fmt.Printf(">>> Button:\n>>>   C=%s\n>>>   Z=%s\n", nun_upd.Buttons.ButC, nun_upd.Buttons.ButZ)
-	fmt.Printf(">>> Joystick:\n>>>   X=%.0f\n>>>   Y=%.0f\n", nun_upd.Joystick.JoyX, nun_upd.Joystick.JoyY)
-	fmt.Println()
+	if DBG_MODE {
+		fmt.Printf(">>> Button:\n>>>   C=%s\n>>>   Z=%s\n", nun_upd.Buttons.ButC, nun_upd.Buttons.ButZ)
+		fmt.Printf(">>> Joystick:\n>>>   X=%.0f\n>>>   Y=%.0f\n", nun_upd.Joystick.JoyX, nun_upd.Joystick.JoyY)
+		fmt.Println()
+	}
 
-	return nil
+	return nun_upd, nil
 }
 
+/***********************************************************************************************************************
+* HID
+***********************************************************************************************************************/
+// simulate HID events with data from protobuf
+func hid_control(upd *pb.NunchukUpdate) {
+
+	// left mouse button clicks
+	if upd.Buttons.ButZ == pb.NunchukUpdate_ButInfo_DOWN {
+		robotgo.MouseToggle("down", "left")
+	}
+	if upd.Buttons.ButZ == pb.NunchukUpdate_ButInfo_UP {
+		robotgo.MouseToggle("up", "left")
+
+	}
+
+	// left mouse button clicks
+	if upd.Buttons.ButC == pb.NunchukUpdate_ButInfo_DOWN {
+		robotgo.MouseToggle("down", "right")
+	}
+	if upd.Buttons.ButC == pb.NunchukUpdate_ButInfo_UP {
+		robotgo.MouseToggle("up", "right")
+	}
+
+	// Update joystick position if necessary
+	if int(upd.Joystick.JoyX) != NO_CHANGE {
+		g_last_coord.x = int(upd.Joystick.JoyX) - 128 // Joy{X,Y} takes values in [0x00, 0xff]
+	}
+	if int(upd.Joystick.JoyY) != NO_CHANGE {
+		g_last_coord.y = int(upd.Joystick.JoyY) - 128
+	}
+
+	// remove some noise
+	if Abs(g_last_coord.x) < BUT_THRESH {
+		g_last_coord.x = 0
+	}
+	if Abs(g_last_coord.y) < BUT_THRESH {
+		g_last_coord.y = 0
+	}
+
+	// Mouse Movement is done in separate goroutine
+	// in order to be able to keep moving the mouse even if joy{x,y} stays constant
+}
+
+func mouse_mover(id int, globalQuit chan struct{}, sig chan int) {
+	for {
+
+		// Current mouse coords
+		m_x, m_y := robotgo.GetMousePos()
+
+		// Use joy position as coord delta
+		m_x += g_last_coord.x
+		m_y -= g_last_coord.y // origin is at top left corner of monitor, so invert the y delta
+
+		// make sure new coords are >=0, otherwise the curser will jump to the oppsite screen side
+		m_x = Max(m_x, 0)
+		m_y = Max(m_y, 0)
+
+		if DBG_MODE {
+			fmt.Printf("New position (%d,%d), delta (%d, %d)\n", m_x, m_y, g_last_coord.x, g_last_coord.y)
+		}
+
+		// Move Mouse to new position
+		robotgo.MoveMouseSmooth(m_x, m_y, 0.0, 1.0)
+		time.Sleep(10 * time.Millisecond)
+
+		// clean exit
+		select {
+		case <-globalQuit:
+			log.Printf("Shutdown mouse mover\n")
+			sig <- id
+			return
+		default:
+			// pass
+		}
+	}
+}
+
+/***********************************************************************************************************************
+* UDP SERVER
+***********************************************************************************************************************/
 // start udp server and listen for incoming packets
 func udp_server(id int, globalQuit chan struct{}, sig chan int) {
 	log.Printf("Starting Event Listener\n")
@@ -99,10 +251,14 @@ func udp_server(id int, globalQuit chan struct{}, sig chan int) {
 				log.Println(err)
 			}
 		} else {
-			// output
-			log.Printf("Received %d bytes from %v\n", len, addr)
+			if DBG_MODE {
+				log.Printf("Received %d bytes from %v\n", len, addr)
+			}
 
-			unpack_proto(buffer[:len])
+			nun_upd, err := unpack_proto(buffer[:len])
+			if err == nil {
+				hid_control(nun_upd)
+			}
 		}
 
 		// clean exit
@@ -118,34 +274,19 @@ func udp_server(id int, globalQuit chan struct{}, sig chan int) {
 	}
 }
 
-func heart_beat(id int, globalQuit chan struct{}, sig chan int) {
-	log.Printf("Starting Heartbeat\n")
-
-	for {
-		log.Printf("Heartbeat\n")
-		time.Sleep(2 * time.Second)
-
-		// clean exit
-		select {
-		case <-globalQuit:
-			log.Printf("Shutdown heartbeat func\n")
-			sig <- id
-			return
-		default:
-			// pass
-		}
-	}
-}
-
+/***********************************************************************************************************************
+* MAIN
+***********************************************************************************************************************/
 func main() {
 	globalQuit := make(chan struct{})
 	sig := make(chan int)
 
 	// array of all parallel running functions
-	funcs := make([]func(int, chan struct{}, chan int), 3)
+	funcs := make([]func(int, chan struct{}, chan int), 4)
 	funcs[0] = heart_beat
 	funcs[1] = udp_server
 	funcs[2] = register_service
+	funcs[3] = mouse_mover
 
 	for i, f := range funcs {
 		// start concurrent functions
