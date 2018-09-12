@@ -156,8 +156,7 @@ func hid_control(upd *pb.NunchukUpdate) {
 	// left mouse button clicks
 	if upd.Buttons.ButZ == pb.NunchukUpdate_ButInfo_DOWN {
 		robotgo.MouseToggle("down", "left")
-	}
-	if upd.Buttons.ButZ == pb.NunchukUpdate_ButInfo_UP {
+	} else if upd.Buttons.ButZ == pb.NunchukUpdate_ButInfo_UP {
 		robotgo.MouseToggle("up", "left")
 
 	}
@@ -165,8 +164,7 @@ func hid_control(upd *pb.NunchukUpdate) {
 	// left mouse button clicks
 	if upd.Buttons.ButC == pb.NunchukUpdate_ButInfo_DOWN {
 		robotgo.MouseToggle("down", "right")
-	}
-	if upd.Buttons.ButC == pb.NunchukUpdate_ButInfo_UP {
+	} else if upd.Buttons.ButC == pb.NunchukUpdate_ButInfo_UP {
 		robotgo.MouseToggle("up", "right")
 	}
 
