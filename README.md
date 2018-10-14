@@ -2,7 +2,7 @@
 
 This application receives nunchuk input events that were send by [**Event Sender**] over the network.
 
-It is part of the _BeagleBone Black_ [buildroot project].
+It is part of my experimental _BeagleBone Black_ [buildroot project].
 
 ## Functionality
 Button input events (**Button C** and **Button Z**) and Joystick input events (**Joystick-Axis X** and **Joystick-Axis Y**) are received as _UDP_ packets from a remote computer.
